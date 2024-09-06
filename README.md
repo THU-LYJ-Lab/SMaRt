@@ -41,10 +41,56 @@ python run_synthesize.py smart_aurora_imagenet64.pth --syn_num 50000
 python run_synthesize.py smart_stylegan2_lsun_bedroom256.pth --syn_num 50000
 ```
 
-## TODO List
+## Training
 
-- [x] Release inference code, [Aurora](https://github.com/zhujiapeng/Aurora) generator on ImageNet 64x64, and [StyleGAN2](https://github.com/NVlabs/stylegan2) generator on LSUN Bedroom 256x256.
-- [ ] Release training code.
+Implementing SMaRt is based on the objective functions below:
+
+$$\mathcal L_{score}=\mathbb E_{\mathbf z,\boldsymbol\epsilon,t}[\|\boldsymbol\epsilon_\theta(\alpha_tg_\phi(\mathbf z)+\sigma_t\boldsymbol\epsilon,t)-\boldsymbol\epsilon\|_2^2]\quad\text{unconditional GAN, Equation (10),}$$
+$$\mathcal L_{score}=\mathbb E_{\mathbf z,\boldsymbol\epsilon,t,c}[\|\boldsymbol\epsilon_\theta(\alpha_tg_\phi(\mathbf z,c)+\sigma_t\boldsymbol\epsilon,c,t)-\boldsymbol\epsilon\|_2^2]\quad\text{conditional GAN, Equation (15).}$$
+
+Therefore, it is necessary to implement the score matching objective using pre-trained DPMs. We provide the pseudo-code below for conditional generation:
+
+```python
+def forward_step(cur_iter, freq, G, DPM, z, c, t, lambda_score=0.1):
+    """Define the forward process of one training step.
+
+    Args:
+        cur_iter: Current iteration, determining whether to use SMaRt.
+        freq: Frequency to involve SMaRt.
+        G: The generator module to learn.
+        DPM: The pre-trained DPM, fixed while training.
+        z: Random noise inputted to G.
+        c: Condition inputted to G.
+        t: Preset timestep for score matching.
+        lambda_score: Loss weight.
+    """
+    # Directly skip.
+    if cur_iter % freq != 0:
+        return None
+
+    # Generate fake images with G.
+    image = G(z, c)
+
+    # Forward diffusing process.
+    noise = torch.randn_like(image)
+    x_t = alpha_t * image + sigma_t * noise
+
+    # Calculate the score matching regularity.
+    noise_pred = DPM(x_t, c, t)
+    loss = (noise - noise_pred).square().mean()
+
+    return loss * lambda_score
+```
+
+According to Table 6 in Appendix, we provide the empirical value of hyper-parameters used in our experiments.
+
+|           Dataset |     CIFAR10 | ImageNet 64 | ImageNet 128 |  LSUN Bedroom |
+| :---------------: | :---------: | :---------: | :----------: | :-----------: |
+|           Setting | Conditional | Conditional |  Conditional | Unconditional |
+|     Dataset Scale |  50K Images | 1.3M Images |  1.3M Images |     3M Images |
+| $\lambda_{score}$ |      $0.01$ |       $0.1$ |        $0.1$ |         $0.1$ |
+|               $t$ |   $[40,60]$ |   $[25,35]$ |    $[25,35]$ |     $[25,35]$ |
+|         Frequency |         $8$ |         $8$ |          $8$ |           $8$ |
 
 ## References
 
